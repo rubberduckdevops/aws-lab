@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to create simple stream'
+
+Parameters:
+  StreamName:
+    Type: String
+    Description: The name of the Kinesis Data Stream
+    Default: MyKinesisStream
+  
+  RetentionPeriodHours:
+    Type: Number
+    Description: The number of hours for the retention period of the stream
+    Default: 24
+    MinValue: 24
+    MaxValue: 8760
+  
+  ShardCount:
+    Type: Number
+    Description: The number of shards for the stream
+    Default: 1
+    MinValue: 1
+  
+  StreamEncryption:
+    Type: String
+    Description: Enable server-side encryption for the stream
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+Resources:
+  MyKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Ref StreamName
+      RetentionPeriodHours: !Ref RetentionPeriodHours
+      ShardCount: !Ref ShardCount
+      StreamEncryption:
+        Fn::If:
+          - EncryptionEnabled
+          - EncryptionType: KMS
+            KeyId: alias/aws/kinesis
+          - !Ref AWS::NoValue
+
+Conditions:
+  EncryptionEnabled: !Equals [!Ref StreamEncryption, true]
+
+Outputs:
+  StreamARN:
+    Description: ARN of the created Kinesis stream
+    Value: !GetAtt MyKinesisStream.Arn
+  
+  StreamName:
+    Description: Name of the created Kinesis stream
+    Value: !Ref MyKinesisStream

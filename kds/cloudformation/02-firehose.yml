@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to create a Kinesis Data Stream with Firehose delivery to S3'
+
+Parameters:
+  StreamName:
+    Type: String
+    Description: The name of the Kinesis Data Stream
+    Default: MyKinesisStream
+  
+  FirehoseName:
+    Type: String
+    Description: The name of the Kinesis Firehose delivery stream
+    Default: MyKinesisFirehose
+  
+  S3BucketName:
+    Type: String
+    Description: The name of the S3 bucket where data will be delivered
+    Default: my-kinesis-data-bucket
+  
+  S3Prefix:
+    Type: String
+    Description: The S3 prefix for delivered data
+    Default: kinesis-data/
+  
+  RetentionPeriodHours:
+    Type: Number
+    Description: The number of hours for the retention period of the stream
+    Default: 24
+    MinValue: 24
+    MaxValue: 8760
+  
+  ShardCount:
+    Type: Number
+    Description: The number of shards for the stream
+    Default: 1
+    MinValue: 1
+  
+  StreamEncryption:
+    Type: String
+    Description: Enable server-side encryption for the stream
+    Default: true
+    AllowedValues:
+      - true
+      - false
+  
+  FirehoseBufferingInterval:
+    Type: Number
+    Description: Buffer incoming data for the specified period (in seconds) before delivering to S3
+    Default: 60
+    MinValue: 60
+    MaxValue: 900
+  
+  FirehoseBufferingSize:
+    Type: Number
+    Description: Buffer incoming data to the specified size (in MBs) before delivering to S3
+    Default: 5
+    MinValue: 1
+    MaxValue: 128
+
+Resources:
+  # Kinesis Data Stream
+  MyKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Ref StreamName
+      RetentionPeriodHours: !Ref RetentionPeriodHours
+      ShardCount: !Ref ShardCount
+      StreamEncryption:
+        Fn::If:
+          - EncryptionEnabled
+          - EncryptionType: KMS
+            KeyId: alias/aws/kinesis
+          - !Ref AWS::NoValue
+  
+  # S3 Bucket for Firehose destination
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  
+  # IAM Role for Firehose to write to S3
+  FirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: firehose-delivery-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Permission to read from Kinesis Stream
+              - Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                Resource: !GetAtt MyKinesisStream.Arn
+              # Permission to write to S3
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${S3BucketName}
+                  - !Sub arn:aws:s3:::${S3BucketName}/*
+              # CloudWatch Logs permissions for error logging
+              - Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${FirehoseName}:log-stream:*
+  
+  # Kinesis Firehose Delivery Stream
+  MyKinesisFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn:
+      - MyKinesisStream
+      - DataBucket
+      - FirehoseDeliveryRole
+    Properties:
+      DeliveryStreamName: !Ref FirehoseName
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt MyKinesisStream.Arn
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt DataBucket.Arn
+        BufferingHints:
+          IntervalInSeconds: !Ref FirehoseBufferingInterval
+          SizeInMBs: !Ref FirehoseBufferingSize
+        CompressionFormat: GZIP
+        Prefix: !Ref S3Prefix
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Sub /aws/kinesisfirehose/${FirehoseName}
+          LogStreamName: S3Delivery
+
+Conditions:
+  EncryptionEnabled: !Equals [!Ref StreamEncryption, true]
+
+Outputs:
+  StreamARN:
+    Description: ARN of the created Kinesis stream
+    Value: !GetAtt MyKinesisStream.Arn
+  
+  StreamName:
+    Description: Name of the created Kinesis stream
+    Value: !Ref MyKinesisStream
+  
+  FirehoseARN:
+    Description: ARN of the created Kinesis Firehose delivery stream
+    Value: !GetAtt MyKinesisFirehose.Arn
+  
+  FirehoseName:
+    Description: Name of the created Kinesis Firehose delivery stream
+    Value: !Ref MyKinesisFirehose
+  
+  S3BucketARN:
+    Description: ARN of the S3 bucket for data delivery
+    Value: !GetAtt DataBucket.Arn
+  
+  S3BucketName:
+    Description: Name of the S3 bucket for data delivery
+    Value: !Ref DataBucket
