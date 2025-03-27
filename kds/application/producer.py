@@ -145,14 +145,10 @@ class KinesisStream:
 
 
 def main(): 
-    stream_name = "MyKinesisStream"
+    stream_name = "KinesisLabStream"
     kinesis_client = boto3.client("kinesis")
     kinesis = KinesisStream(kinesis_client=kinesis_client)
     
-    try:
-        kinesis.create(stream_name)
-    except ClientError as e:
-        logger.info("Already Exists moving on...")
     logger.info(kinesis.describe(stream_name))
     
     while True: 

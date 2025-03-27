@@ -259,7 +259,7 @@ class KinesisStream:
 
 
 def main(): 
-    stream_name = "MyKinesisStream"
+    stream_name = "KinesisLabStream"
     checkpoint_file_name="random_check"
     kinesis_client = boto3.client("kinesis")
     stream = KinesisStream(kinesis_client=kinesis_client)
